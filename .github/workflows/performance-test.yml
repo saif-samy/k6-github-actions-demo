@@ -1,29 +1,28 @@
-name: k6 Performance Testing Pipeline
+name: k6 Performance Testing Pipeline (Git Bash on Windows)
 
-# Trigger on push/PR to main, or manually from the GitHub Actions UI
 on:
   push:
     branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
   workflow_dispatch:
+
+# Force all steps to use Git Bash instead of PowerShell on Windows
+defaults:
+  run:
+    shell: bash
 
 jobs:
   load-test:
-    runs-on: self-hosted
+    runs-on: [self-hosted, Windows, X64]
 
     steps:
-      # Step 1: Download the repository code onto the runner
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Step 3: Install Express and start the dummy server in the background
       - name: Install dependencies & Start API Server
         run: |
           npm install
           nohup npm start > server.log 2>&1 &
           
-          # Wait loop to verify the server is ready before starting k6
           echo "Waiting for API server to launch..."
           for i in {1..15}; do
             if curl -s http://localhost:3000/api/health | grep -q "ok"; then
@@ -33,22 +32,19 @@ jobs:
             sleep 1
           done
 
-      # Step 4: Install the official Grafana k6 binary
-      - name: Setup Grafana k6
-        uses: grafana/setup-k6-action@v1
-
-      # Step 5: Execute the k6 performance test script
       - name: Run k6 Load Test
-        uses: grafana/run-k6-action@v1
-        with:
-          path: tests/load-test.js
-          flags: --summary-export=k6-summary.json
+        run: k6 run --summary-export=k6-summary.json tests/load-test.js
         env:
           BASE_URL: http://localhost:3000
 
-      # Step 6: Save the performance test results as a downloadable artifact
+      - name: Stop Local API Server
+        if: always()
+        run: |
+          # Stop Node.js server on Windows via taskkill
+          taskkill //F //IM node.exe //T || true
+
       - name: Upload k6 Summary Report
-        if: always() # Runs even if thresholds fail so you can inspect the report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: k6-performance-summary
