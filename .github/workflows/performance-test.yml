@@ -10,7 +10,7 @@ on:
 
 jobs:
   load-test:
-    runs-on: LEGION-SEIF
+    runs-on: self-hosted
 
     steps:
       # Step 1: Download the repository code onto the runner
