@@ -10,18 +10,12 @@ on:
 
 jobs:
   load-test:
-    runs-on: ubuntu-latest
+    runs-on: LEGION-SEIF
 
     steps:
       # Step 1: Download the repository code onto the runner
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      # Step 2: Set up Node.js environment
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
 
       # Step 3: Install Express and start the dummy server in the background
       - name: Install dependencies & Start API Server
