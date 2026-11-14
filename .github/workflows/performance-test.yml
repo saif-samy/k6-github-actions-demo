@@ -3,31 +3,36 @@ name: k6 Performance Testing Pipeline (Windows Self-Hosted)
 on:
   push:
     branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
   load-test:
+    # Matches the labels on your LEGION-SEIF self-hosted runner
     runs-on: [self-hosted, Windows, X64]
 
     steps:
+      # Step 1: Checkout repository code onto the local runner
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Step 2: Install Node dependencies and start the API server in the background
       - name: Install dependencies & Start API Server
         shell: powershell
         run: |
           npm install
           
-          # Start Node.js server in the background on Windows
+          # Start Node.js server in the background on Windows and record its Process ID
           $server = Start-Process -FilePath "node" -ArgumentList "src/server.js" -PassThru -WindowStyle Hidden
-          "SERVER_PID=$($server.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "SERVER_PID=$($server.Id)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
           Write-Host "Waiting for API server to launch..."
           for ($i = 1; $i -le 15; $i++) {
             try {
               $res = Invoke-RestMethod -Uri "http://localhost:3000/api/health" -ErrorAction Stop
               if ($res.status -eq "ok") {
-                Write-Host "API Server is up and running!"
+                Write-Host "API Server is up and running! (PID: $($server.Id))"
                 break
               }
             } catch {
@@ -35,21 +40,42 @@ jobs:
             }
           }
 
+      # Step 3: Automatically download portable k6 for Windows if not already in PATH
+      - name: Ensure k6 is Installed on Runner
+        shell: powershell
+        run: |
+          if (-not (Get-Command k6 -ErrorAction SilentlyContinue)) {
+            Write-Host "k6 not found in PATH. Downloading portable k6 for Windows..."
+            $k6Url = "https://github.com/grafana/k6/releases/download/v0.54.0/k6-v0.54.0-windows-amd64.zip"
+            Invoke-WebRequest -Uri $k6Url -OutFile "k6.zip"
+            Expand-Archive -Path "k6.zip" -DestinationPath "k6-bin" -Force
+            $k6Folder = (Get-ChildItem -Path "k6-bin" -Directory | Select-Object -First 1).FullName
+            
+            # Add the extracted k6 folder to the GitHub Actions PATH for subsequent steps
+            echo "$k6Folder" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            Write-Host "Portable k6 installed at: $k6Folder"
+          } else {
+            Write-Host "k6 is already available in PATH."
+          }
+
+      # Step 4: Execute the k6 load test script and export the JSON summary
       - name: Run k6 Load Test
         shell: powershell
         run: k6 run --summary-export=k6-summary.json tests/load-test.js
         env:
           BASE_URL: http://localhost:3000
 
+      # Step 5: Stop the background Node.js API server so port 3000 is freed up
       - name: Stop Local API Server
         if: always()
         shell: powershell
         run: |
           if ($env:SERVER_PID) {
             Stop-Process -Id $env:SERVER_PID -Force -ErrorAction SilentlyContinue
-            Write-Host "Stopped Node.js server (PID: $env:SERVER_PID)"
+            Write-Host "Stopped Node.js API server (PID: $env:SERVER_PID)"
           }
 
+      # Step 6: Upload the k6 summary report as a downloadable artifact in GitHub
       - name: Upload k6 Summary Report
         if: always()
         uses: actions/upload-artifact@v4
