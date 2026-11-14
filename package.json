@@ -1,0 +1,12 @@
+{
+  "name": "k6-github-actions-demo",
+  "version": "1.0.0",
+  "description": "Dummy API for k6 performance testing in GitHub Actions",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}
