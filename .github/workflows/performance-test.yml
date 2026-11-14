@@ -9,7 +9,6 @@ on:
 
 jobs:
   load-test:
-    # Matches the labels on your LEGION-SEIF self-hosted runner
     runs-on: [self-hosted, Windows, X64]
 
     steps:
@@ -23,7 +22,6 @@ jobs:
         run: |
           npm install
           
-          # Start Node.js server in the background on Windows and record its Process ID
           $server = Start-Process -FilePath "node" -ArgumentList "src/server.js" -PassThru -WindowStyle Hidden
           "SERVER_PID=$($server.Id)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
@@ -51,7 +49,6 @@ jobs:
             Expand-Archive -Path "k6.zip" -DestinationPath "k6-bin" -Force
             $k6Folder = (Get-ChildItem -Path "k6-bin" -Directory | Select-Object -First 1).FullName
             
-            # Add the extracted k6 folder to the GitHub Actions PATH for subsequent steps
             echo "$k6Folder" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
             Write-Host "Portable k6 installed at: $k6Folder"
           } else {
@@ -65,7 +62,7 @@ jobs:
         env:
           BASE_URL: http://localhost:3000
 
-      # Step 5: Stop the background Node.js API server so port 3000 is freed up
+      # Step 5: Stop the background Node.js API server
       - name: Stop Local API Server
         if: always()
         shell: powershell
@@ -75,10 +72,36 @@ jobs:
             Write-Host "Stopped Node.js API server (PID: $env:SERVER_PID)"
           }
 
-      # Step 6: Upload the k6 summary report as a downloadable artifact in GitHub
-      - name: Upload k6 Summary Report
+      # Step 6: Publish Summary Table to GitHub UI & Save Report Locally (Bypasses Quota)
+      - name: Publish Performance Report
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: k6-performance-summary
-          path: k6-summary.json
+        shell: powershell
+        run: |
+          if (Test-Path "k6-summary.json") {
+            $summary = Get-Content "k6-summary.json" -Raw | ConvertFrom-Json
+            $totalReqs = $summary.metrics.http_reqs.count
+            $rps = [math]::Round($summary.metrics.http_reqs.rate, 2)
+            $avgDur = [math]::Round($summary.metrics.http_req_duration.avg, 2)
+            $p95Dur = [math]::Round($summary.metrics.http_req_duration.'p(95)', 2)
+            $failRate = [math]::Round(($summary.metrics.http_req_failed.value * 100), 2)
+
+            # Write a visual Markdown table directly to the GitHub Actions Summary page
+            $md = @"
+          ### 📊 k6 Performance Test Results
+          | Metric | Value | Threshold |
+          | :--- | :--- | :--- |
+          | **Total HTTP Requests** | $totalReqs | - |
+          | **Throughput (RPS)** | $rps req/s | - |
+          | **Average Response Time** | ${avgDur} ms | - |
+          | **95th Percentile (p95)** | ${p95Dur} ms | < 250 ms |
+          | **Error Rate** | ${failRate}% | < 1% |
+          "@
+            $md | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+            # Archive a local copy on your computer
+            $reportDir = "C:\Users\saifs\performance-testing\reports"
+            New-Item -ItemType Directory -Force -Path $reportDir | Out-Null
+            $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+            Copy-Item "k6-summary.json" -Destination "$reportDir\k6-summary-$timestamp.json"
+            Write-Host "Saved report locally to: $reportDir\k6-summary-$timestamp.json"
+          }
